@@ -1,9 +1,10 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import { useProjectStore } from '../../store/projectStore'
 import { CanvasRenderer } from '../../engine/renderer/canvasRenderer'
-import type { RuntimeState, SceneObject } from '../../types'
+import { getActiveGameLoop } from '../../engine/runtime/gameLoop'
+import type { RuntimeState } from '../../types'
 import { v4 as uuidv4 } from 'uuid'
-import { createShapeObject } from '../../utils/defaults'
+import { createImageObject } from '../../utils/defaults'
 
 export function CanvasArea() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -24,7 +25,6 @@ export function CanvasArea() {
   const scene = getActiveScene()
   const project = getActiveProject()
 
-  // Listen for runtime updates
   useEffect(() => {
     const handler = (e: Event) => {
       runtimeStateRef.current = (e as CustomEvent).detail
@@ -34,14 +34,12 @@ export function CanvasArea() {
     return () => window.removeEventListener('runtime-update', handler)
   }, [])
 
-  // Setup renderer
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     rendererRef.current = new CanvasRenderer(canvas)
   }, [])
 
-  // Resize observer
   useEffect(() => {
     const container = containerRef.current
     const canvas = canvasRef.current
@@ -57,7 +55,6 @@ export function CanvasArea() {
     return () => ro.disconnect()
   }, [])
 
-  // Render loop
   useEffect(() => {
     const render = () => {
       const canvas = canvasRef.current
@@ -88,7 +85,7 @@ export function CanvasArea() {
     return Math.round(v / editor.gridSize) * editor.gridSize
   }, [editor.gridSnap, editor.gridSize])
 
-  const getCanvasPoint = useCallback((e: React.MouseEvent | MouseEvent): { x: number; y: number } => {
+  const getCanvasPoint = useCallback((e: React.MouseEvent | MouseEvent | React.WheelEvent): { x: number; y: number } => {
     const canvas = canvasRef.current
     if (!canvas) return { x: 0, y: 0 }
     const rect = canvas.getBoundingClientRect()
@@ -99,8 +96,15 @@ export function CanvasArea() {
     if (!scene || !rendererRef.current) return
     const pt = getCanvasPoint(e)
 
+    if (editor.isPlaying) {
+      if (e.button === 0) {
+        const hitId = rendererRef.current.hitTest(scene, pt.x, pt.y, editor.canvasTransform)
+        getActiveGameLoop()?.handleCanvasClick(hitId)
+      }
+      return
+    }
+
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
-      // Pan
       isPanning.current = true
       panStart.current = { mx: pt.x, my: pt.y, tx: editor.canvasTransform.x, ty: editor.canvasTransform.y }
       return
@@ -111,7 +115,6 @@ export function CanvasArea() {
 
       if (hitId) {
         if (e.shiftKey) {
-          // Multi-select toggle
           const ids = editor.selectedObjectIds.includes(hitId)
             ? editor.selectedObjectIds.filter(id => id !== hitId)
             : [...editor.selectedObjectIds, hitId]
@@ -122,7 +125,6 @@ export function CanvasArea() {
           }
         }
 
-        // Start drag
         const obj = scene.objects.find(o => o.id === hitId)
         if (obj) {
           isDraggingObject.current = true
@@ -173,7 +175,6 @@ export function CanvasArea() {
     const delta = e.deltaY > 0 ? 0.9 : 1.1
     const newScale = Math.min(Math.max(editor.canvasTransform.scale * delta, 0.1), 5)
 
-    // Zoom towards cursor
     const scaleChange = newScale / editor.canvasTransform.scale
     const newX = pt.x - scaleChange * (pt.x - editor.canvasTransform.x)
     const newY = pt.y - scaleChange * (pt.y - editor.canvasTransform.y)
@@ -181,7 +182,6 @@ export function CanvasArea() {
     setCanvasTransform({ scale: newScale, x: newX, y: newY })
   }, [editor.canvasTransform, setCanvasTransform, getCanvasPoint])
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
@@ -202,7 +202,6 @@ export function CanvasArea() {
     return () => window.removeEventListener('keydown', handler)
   }, [editor.selectedObjectIds, store])
 
-  // Drop from block palette (shape creation)
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     const type = e.dataTransfer.getData('object-type')
@@ -211,14 +210,14 @@ export function CanvasArea() {
     const pt = getCanvasPoint(e)
     const scenePos = rendererRef.current.canvasToScene(pt.x, pt.y, scene, editor.canvasTransform)
 
-    if (type === 'shape') {
-      const shape = createShapeObject({
+    if (type === 'image') {
+      const image = createImageObject({
         id: uuidv4(),
         x: snapToGrid(scenePos.x - 40),
         y: snapToGrid(scenePos.y - 40),
-        name: 'Neue Form',
+        name: 'Neues Bild',
       })
-      addObject(shape)
+      addObject(image)
     }
   }, [scene, editor.canvasTransform, addObject, snapToGrid, getCanvasPoint])
 
@@ -240,7 +239,6 @@ export function CanvasArea() {
         onWheel={handleWheel}
       />
 
-      {/* Info overlay */}
       <div className="absolute bottom-3 left-3 flex items-center gap-2 text-xs text-surface-500 font-mono pointer-events-none">
         <span>{Math.round(editor.canvasTransform.scale * 100)}%</span>
         {scene && <span>{scene.width}×{scene.height}</span>}
@@ -250,7 +248,6 @@ export function CanvasArea() {
         {editor.isPlaying && <span className="text-green-400 animate-pulse">● Läuft</span>}
       </div>
 
-      {/* Zoom controls */}
       <div className="absolute bottom-3 right-3 flex flex-col gap-1">
         <button
           className="w-7 h-7 rounded bg-surface-800 border border-surface-700 text-surface-300 hover:bg-surface-700 flex items-center justify-center text-sm"

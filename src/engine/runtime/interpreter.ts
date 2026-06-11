@@ -20,7 +20,17 @@ export class BlockInterpreter {
   async runScript(script: BlockScript): Promise<void> {
     for (const block of script.blocks) {
       if (this.ctx.stopFlag) break
-      await this.executeBlock(block)
+      await this.executeBlock(this.withTargetObject(block, script.objectId))
+    }
+  }
+
+  private withTargetObject(block: Block, objectId: string): Block {
+    return {
+      ...block,
+      objectId: block.objectId ?? objectId,
+      children: block.children?.map(child => this.withTargetObject(child, objectId)),
+      elseChildren: block.elseChildren?.map(child => this.withTargetObject(child, objectId)),
+      next: block.next ? this.withTargetObject(block.next, objectId) : undefined,
     }
   }
 
@@ -28,15 +38,15 @@ export class BlockInterpreter {
     if (this.ctx.stopFlag) return
 
     switch (block.type) {
-      // ── Lifecycle (handled externally) ──────────────────────────────────────
       case 'setup':
       case 'loop_tick':
+      case 'on_click':
+      case 'on_key_down':
         for (const child of block.children ?? []) {
           await this.executeBlock(child)
         }
         break
 
-      // ── Variables ───────────────────────────────────────────────────────────
       case 'var_declare': {
         const name = String(this.getParam(block, 'name'))
         const val = this.getParam(block, 'value')
@@ -53,7 +63,6 @@ export class BlockInterpreter {
       case 'var_get':
         return this.ctx.variables.get(String(this.getParam(block, 'name')))?.value ?? 0
 
-      // ── Logic ───────────────────────────────────────────────────────────────
       case 'if': {
         const cond = await this.evalCondition(block)
         if (cond) {
@@ -85,7 +94,6 @@ export class BlockInterpreter {
       case 'not':
         return !Boolean(this.getParam(block, 'value'))
 
-      // ── Loops ───────────────────────────────────────────────────────────────
       case 'repeat': {
         const count = Number(this.getParam(block, 'count'))
         for (let i = 0; i < count && !this.ctx.stopFlag; i++) {
@@ -115,7 +123,6 @@ export class BlockInterpreter {
         break
       }
 
-      // ── Math ─────────────────────────────────────────────────────────────────
       case 'math_add':    return Number(this.getParam(block, 'a')) + Number(this.getParam(block, 'b'))
       case 'math_sub':    return Number(this.getParam(block, 'a')) - Number(this.getParam(block, 'b'))
       case 'math_mul':    return Number(this.getParam(block, 'a')) * Number(this.getParam(block, 'b'))
@@ -137,7 +144,6 @@ export class BlockInterpreter {
       }
       case 'math_number': return Number(this.getParam(block, 'value'))
 
-      // ── Motion ───────────────────────────────────────────────────────────────
       case 'move_forward':
       case 'move_back':
       case 'move_left':
@@ -174,7 +180,6 @@ export class BlockInterpreter {
         break
       }
 
-      // ── Control ──────────────────────────────────────────────────────────────
       case 'wait': {
         const ms = Number(this.getParam(block, 'ms'))
         await new Promise(r => setTimeout(r, ms))
@@ -223,7 +228,6 @@ export class BlockInterpreter {
     const p = block.params.find(p => p.name === name)
     if (!p) return 0
     const val = p.value ?? p.defaultValue ?? 0
-    // Check if it references a variable
     if (typeof val === 'string' && this.ctx.variables.has(val)) {
       return this.ctx.variables.get(val)!.value
     }

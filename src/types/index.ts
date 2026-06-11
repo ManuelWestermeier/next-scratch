@@ -9,7 +9,7 @@ export interface BaseObject {
   y: number
   w: number
   h: number
-  r: number       // rotation in degrees
+  r: number
   visible: boolean
   layer: number
   locked: boolean
@@ -54,7 +54,7 @@ export type BlockCategory =
 
 export type BlockType =
   // Lifecycle
-  | 'setup' | 'loop_tick'
+  | 'setup' | 'loop_tick' | 'on_click' | 'on_key_down'
   // Variables
   | 'var_declare' | 'var_set' | 'var_get'
   // Logic
@@ -76,25 +76,39 @@ export interface BlockParam {
   type: 'number' | 'string' | 'boolean' | 'any' | 'blockRef'
   defaultValue?: string | number | boolean
   value?: string | number | boolean
-  blockId?: string // for inline block references
+  blockId?: string
 }
 
 export interface Block {
   id: string
   type: BlockType
   params: BlockParam[]
-  children?: Block[]   // nested blocks (for if, loop, etc.)
-  elseChildren?: Block[] // for if_else
-  next?: Block         // next block in sequence
+  children?: Block[]
+  elseChildren?: Block[]
+  next?: Block
   comment?: string
-  objectId?: string    // which object this block is attached to
+  objectId?: string
   collapsed?: boolean
 }
 
 export interface BlockScript {
   id: string
   objectId: string
-  trigger: 'setup' | 'loop' | 'event'
+  trigger: 'setup' | 'loop' | 'event' | 'click' | 'keydown'
+  blocks: Block[]
+}
+
+export interface SceneVariable {
+  id: string
+  name: string
+  type: 'number' | 'string' | 'boolean'
+  defaultValue: string | number | boolean
+}
+
+export interface SceneFunction {
+  id: string
+  name: string
+  params: string[]
   blocks: Block[]
 }
 
@@ -108,6 +122,8 @@ export interface Scene {
   backgroundColor: string
   width: number
   height: number
+  variables: SceneVariable[]
+  functions: SceneFunction[]
 }
 
 // ─── Asset ────────────────────────────────────────────────────────────────────
@@ -118,7 +134,7 @@ export interface Asset {
   id: string
   name: string
   type: AssetType
-  dataUrl: string    // base64 data URL
+  dataUrl: string
   size: number
   mimeType: string
   width?: number

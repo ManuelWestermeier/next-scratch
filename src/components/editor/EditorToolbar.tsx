@@ -15,10 +15,10 @@ export function EditorToolbar() {
 
   const handlePlay = () => {
     if (!scene) return
+    gameLoopInstance?.stop()
     setPlaying(true)
     gameLoopInstance = new GameLoop((state) => {
       runtimeRef.current = state
-      // Trigger re-render by dispatching custom event
       window.dispatchEvent(new CustomEvent('runtime-update', { detail: state }))
     })
     gameLoopInstance.start(scene)
@@ -49,7 +49,6 @@ export function EditorToolbar() {
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 bg-surface-900 border-b border-surface-800 select-none">
-      {/* Logo / back */}
       <button
         onClick={closeProject}
         className="flex items-center gap-1.5 text-surface-400 hover:text-surface-200 transition-colors mr-2"
@@ -60,28 +59,15 @@ export function EditorToolbar() {
 
       <div className="w-px h-5 bg-surface-700" />
 
-      {/* Project name */}
       <span className="text-sm font-semibold text-surface-200 truncate max-w-36">{project?.name}</span>
 
-      {/* Dirty indicator */}
       {editor.isDirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Ungespeicherte Änderungen" />}
 
       <div className="flex-1" />
 
-      {/* Tools */}
       <div className="flex items-center gap-1">
-        <ToolBtn
-          active={editor.showGrid}
-          onClick={toggleGrid}
-          title="Gitter ein/aus"
-          label="⊞"
-        />
-        <ToolBtn
-          active={editor.gridSnap}
-          onClick={toggleGridSnap}
-          title="Gitter-Snap"
-          label="⊠"
-        />
+        <ToolBtn active={editor.showGrid} onClick={toggleGrid} title="Gitter ein/aus" label="⊞" />
+        <ToolBtn active={editor.gridSnap} onClick={toggleGridSnap} title="Gitter-Snap" label="⊠" />
         <ToolBtn
           onClick={handleResetZoom}
           title="Zoom zurücksetzen"
@@ -92,7 +78,6 @@ export function EditorToolbar() {
 
       <div className="w-px h-5 bg-surface-700" />
 
-      {/* Snapshot */}
       <button
         className="btn-ghost text-xs"
         onClick={() => saveSnapshot('Manueller Snapshot')}
@@ -101,7 +86,6 @@ export function EditorToolbar() {
         💾 Speichern
       </button>
 
-      {/* Export */}
       <button
         className="btn-ghost text-xs"
         onClick={handleExport}
@@ -112,7 +96,6 @@ export function EditorToolbar() {
 
       <div className="w-px h-5 bg-surface-700" />
 
-      {/* Play/Stop */}
       {editor.isPlaying ? (
         <button
           className="btn btn-danger text-xs px-4"

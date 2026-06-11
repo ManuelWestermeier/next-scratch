@@ -3,18 +3,15 @@ import { v4 as uuidv4 } from 'uuid'
 import type {
   Project, Scene, Asset, HistorySnapshot, SceneObject,
   Block, BlockScript, VariableDeclaration, FunctionDeclaration,
-  EditorState, CanvasTransform, BlockType
+  EditorState, CanvasTransform
 } from '../types'
 import { storage } from '../utils/storage'
-import { createDefaultScene } from '../utils/defaults'
-
-// ─── Project Store ────────────────────────────────────────────────────────────
+import { createDefaultScene, createDemoProject } from '../utils/defaults'
 
 interface ProjectStore {
   projects: Project[]
   editor: EditorState
 
-  // Project CRUD
   loadProjects: () => void
   createProject: (name: string) => Project
   deleteProject: (id: string) => void
@@ -24,14 +21,12 @@ interface ProjectStore {
   closeProject: () => void
   getActiveProject: () => Project | null
 
-  // Scene management
   createScene: (projectId: string, name: string) => Scene
   deleteScene: (projectId: string, sceneId: string) => void
   renameScene: (projectId: string, sceneId: string, name: string) => void
   setActiveScene: (sceneId: string) => void
   getActiveScene: () => Scene | null
 
-  // Object management
   addObject: (obj: SceneObject) => void
   updateObject: (id: string, changes: Partial<SceneObject>) => void
   deleteObject: (id: string) => void
@@ -40,33 +35,27 @@ interface ProjectStore {
   bringForward: (id: string) => void
   sendBackward: (id: string) => void
 
-  // Asset management
   addAsset: (asset: Asset) => void
   deleteAsset: (id: string) => void
   getAssets: () => Asset[]
 
-  // Block/Script management
   addScript: (script: BlockScript) => void
   updateScript: (scriptId: string, blocks: Block[]) => void
   deleteScript: (scriptId: string) => void
   getScriptsForObject: (objectId: string) => BlockScript[]
 
-  // Variable management
   addVariable: (v: VariableDeclaration) => void
   updateVariable: (id: string, changes: Partial<VariableDeclaration>) => void
   deleteVariable: (id: string) => void
 
-  // Function management
   addFunction: (f: FunctionDeclaration) => void
   updateFunction: (id: string, changes: Partial<FunctionDeclaration>) => void
   deleteFunction: (id: string) => void
 
-  // History
   saveSnapshot: (label?: string) => void
   restoreSnapshot: (snapshotId: string) => void
   getHistory: () => HistorySnapshot[]
 
-  // Editor state
   setEditorState: (changes: Partial<EditorState>) => void
   setCanvasTransform: (t: Partial<CanvasTransform>) => void
   setActiveTab: (tab: EditorState['activeTab']) => void
@@ -75,7 +64,6 @@ interface ProjectStore {
   setPlaying: (v: boolean) => void
   setDirty: (v: boolean) => void
 
-  // Persistence
   saveProject: (project: Project) => void
   exportProject: (id: string) => Promise<Blob>
   importProject: (blob: Blob) => Promise<Project>
@@ -97,13 +85,43 @@ const initialEditorState: EditorState = {
   draggedBlockType: null,
 }
 
+function normalizeScene(scene: Scene): Scene {
+  return {
+    ...scene,
+    variables: scene.variables ?? [],
+    functions: scene.functions ?? [],
+    scripts: scene.scripts ?? [],
+    objects: scene.objects ?? [],
+  }
+}
+
+function normalizeProject(project: Project): Project {
+  return {
+    ...project,
+    scenes: (project.scenes ?? []).map(normalizeScene),
+    assets: project.assets ?? [],
+    history: project.history ?? [],
+    variables: project.variables ?? [],
+    functions: project.functions ?? [],
+  }
+}
+
+function persistProject(project: Project) {
+  storage.saveProject(project)
+}
+
 export const useProjectStore = create<ProjectStore>((set, get) => ({
   projects: [],
   editor: initialEditorState,
 
   loadProjects: () => {
-    const projects = storage.loadProjects()
-    set({ projects })
+    const loaded = storage.loadProjects().map(normalizeProject)
+    if (loaded.length === 0) {
+      const demo = createDemoProject()
+      loaded.push(demo)
+      persistProject(demo)
+    }
+    set({ projects: loaded })
   },
 
   createProject: (name) => {
@@ -121,7 +139,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       functions: [],
     }
     set(s => ({ projects: [...s.projects, project] }))
-    storage.saveProject(project)
+    persistProject(project)
     return project
   },
 
@@ -133,7 +151,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   duplicateProject: (id) => {
     const src = get().projects.find(p => p.id === id)
     if (!src) throw new Error('Project not found')
-    const scene = createDefaultScene()
     const dup: Project = {
       ...JSON.parse(JSON.stringify(src)),
       id: uuidv4(),
@@ -141,18 +158,23 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       createdAt: Date.now(),
       updatedAt: Date.now(),
       history: [],
+      scenes: src.scenes.map(normalizeScene),
     }
     set(s => ({ projects: [...s.projects, dup] }))
-    storage.saveProject(dup)
+    persistProject(dup)
     return dup
   },
 
   renameProject: (id, name) => {
+    let updated: Project | null = null
     set(s => ({
-      projects: s.projects.map(p => p.id === id ? { ...p, name, updatedAt: Date.now() } : p)
+      projects: s.projects.map(p => {
+        if (p.id !== id) return p
+        updated = { ...p, name, updatedAt: Date.now() }
+        return updated
+      })
     }))
-    const p = get().projects.find(p => p.id === id)
-    if (p) storage.saveProject(p)
+    if (updated) persistProject(updated)
   },
 
   openProject: (id) => {
@@ -190,7 +212,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       )
     }))
     const proj = get().projects.find(p => p.id === projectId)
-    if (proj) storage.saveProject(proj)
+    if (proj) persistProject(proj)
     return scene
   },
 
@@ -203,7 +225,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       })
     }))
     const proj = get().projects.find(p => p.id === projectId)
-    if (proj) storage.saveProject(proj)
+    if (proj) persistProject(proj)
   },
 
   renameScene: (projectId, sceneId, name) => {
@@ -217,7 +239,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       )
     }))
     const proj = get().projects.find(p => p.id === projectId)
-    if (proj) storage.saveProject(proj)
+    if (proj) persistProject(proj)
   },
 
   setActiveScene: (sceneId) => {
@@ -254,7 +276,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       editor: { ...s.editor, isDirty: true }
     }))
     const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
+    if (proj) persistProject(proj)
   },
 
   updateObject: (id, changes) => {
@@ -278,7 +300,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       editor: { ...s.editor, isDirty: true }
     }))
     const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
+    if (proj) persistProject(proj)
   },
 
   deleteObject: (id) => {
@@ -304,7 +326,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       }
     }))
     const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
+    if (proj) persistProject(proj)
   },
 
   duplicateObject: (id) => {
@@ -345,7 +367,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       )
     }))
     const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
+    if (proj) persistProject(proj)
   },
 
   deleteAsset: (id) => {
@@ -357,7 +379,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       )
     }))
     const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
+    if (proj) persistProject(proj)
   },
 
   getAssets: () => {
@@ -381,7 +403,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       editor: { ...s.editor, isDirty: true }
     }))
     const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
+    if (proj) persistProject(proj)
   },
 
   updateScript: (scriptId, blocks) => {
@@ -403,7 +425,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       editor: { ...s.editor, isDirty: true }
     }))
     const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
+    if (proj) persistProject(proj)
   },
 
   deleteScript: (scriptId) => {
@@ -424,7 +446,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       )
     }))
     const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
+    if (proj) persistProject(proj)
   },
 
   getScriptsForObject: (objectId) => {
@@ -433,81 +455,123 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   addVariable: (v) => {
-    const { activeProjectId } = get().editor
-    if (!activeProjectId) return
+    const scene = get().getActiveScene()
+    const activeProjectId = get().editor.activeProjectId
+    if (!scene || !activeProjectId) return
+    const updatedScene: Scene = { ...scene, variables: [...(scene.variables ?? []), v] }
     set(s => ({
       projects: s.projects.map(p =>
-        p.id !== activeProjectId ? p : { ...p, variables: [...p.variables, v] }
+        p.id !== activeProjectId ? p : {
+          ...p,
+          scenes: p.scenes.map(sc => sc.id === scene.id ? updatedScene : sc),
+          updatedAt: Date.now()
+        }
       )
     }))
-    const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
+    const proj = get().getActiveProject()
+    if (proj) persistProject(proj)
   },
 
   updateVariable: (id, changes) => {
-    const { activeProjectId } = get().editor
-    if (!activeProjectId) return
+    const scene = get().getActiveScene()
+    const activeProjectId = get().editor.activeProjectId
+    if (!scene || !activeProjectId) return
+    const updatedScene: Scene = {
+      ...scene,
+      variables: (scene.variables ?? []).map(v => v.id === id ? { ...v, ...changes } : v)
+    }
     set(s => ({
       projects: s.projects.map(p =>
         p.id !== activeProjectId ? p : {
           ...p,
-          variables: p.variables.map(v => v.id === id ? { ...v, ...changes } : v)
+          scenes: p.scenes.map(sc => sc.id === scene.id ? updatedScene : sc),
+          updatedAt: Date.now()
         }
       )
     }))
-    const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
+    const proj = get().getActiveProject()
+    if (proj) persistProject(proj)
   },
 
   deleteVariable: (id) => {
-    const { activeProjectId } = get().editor
-    if (!activeProjectId) return
-    set(s => ({
-      projects: s.projects.map(p =>
-        p.id !== activeProjectId ? p : { ...p, variables: p.variables.filter(v => v.id !== id) }
-      )
-    }))
-    const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
-  },
-
-  addFunction: (f) => {
-    const { activeProjectId } = get().editor
-    if (!activeProjectId) return
-    set(s => ({
-      projects: s.projects.map(p =>
-        p.id !== activeProjectId ? p : { ...p, functions: [...p.functions, f] }
-      )
-    }))
-    const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
-  },
-
-  updateFunction: (id, changes) => {
-    const { activeProjectId } = get().editor
-    if (!activeProjectId) return
+    const scene = get().getActiveScene()
+    const activeProjectId = get().editor.activeProjectId
+    if (!scene || !activeProjectId) return
+    const updatedScene: Scene = {
+      ...scene,
+      variables: (scene.variables ?? []).filter(v => v.id !== id)
+    }
     set(s => ({
       projects: s.projects.map(p =>
         p.id !== activeProjectId ? p : {
           ...p,
-          functions: p.functions.map(f => f.id === id ? { ...f, ...changes } : f)
+          scenes: p.scenes.map(sc => sc.id === scene.id ? updatedScene : sc),
+          updatedAt: Date.now()
         }
       )
     }))
-    const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
+    const proj = get().getActiveProject()
+    if (proj) persistProject(proj)
+  },
+
+  addFunction: (f) => {
+    const scene = get().getActiveScene()
+    const activeProjectId = get().editor.activeProjectId
+    if (!scene || !activeProjectId) return
+    const updatedScene: Scene = { ...scene, functions: [...(scene.functions ?? []), f] }
+    set(s => ({
+      projects: s.projects.map(p =>
+        p.id !== activeProjectId ? p : {
+          ...p,
+          scenes: p.scenes.map(sc => sc.id === scene.id ? updatedScene : sc),
+          updatedAt: Date.now()
+        }
+      )
+    }))
+    const proj = get().getActiveProject()
+    if (proj) persistProject(proj)
+  },
+
+  updateFunction: (id, changes) => {
+    const scene = get().getActiveScene()
+    const activeProjectId = get().editor.activeProjectId
+    if (!scene || !activeProjectId) return
+    const updatedScene: Scene = {
+      ...scene,
+      functions: (scene.functions ?? []).map(f => f.id === id ? { ...f, ...changes } : f)
+    }
+    set(s => ({
+      projects: s.projects.map(p =>
+        p.id !== activeProjectId ? p : {
+          ...p,
+          scenes: p.scenes.map(sc => sc.id === scene.id ? updatedScene : sc),
+          updatedAt: Date.now()
+        }
+      )
+    }))
+    const proj = get().getActiveProject()
+    if (proj) persistProject(proj)
   },
 
   deleteFunction: (id) => {
-    const { activeProjectId } = get().editor
-    if (!activeProjectId) return
+    const scene = get().getActiveScene()
+    const activeProjectId = get().editor.activeProjectId
+    if (!scene || !activeProjectId) return
+    const updatedScene: Scene = {
+      ...scene,
+      functions: (scene.functions ?? []).filter(f => f.id !== id)
+    }
     set(s => ({
       projects: s.projects.map(p =>
-        p.id !== activeProjectId ? p : { ...p, functions: p.functions.filter(f => f.id !== id) }
+        p.id !== activeProjectId ? p : {
+          ...p,
+          scenes: p.scenes.map(sc => sc.id === scene.id ? updatedScene : sc),
+          updatedAt: Date.now()
+        }
       )
     }))
-    const proj = get().projects.find(p => p.id === activeProjectId)
-    if (proj) storage.saveProject(proj)
+    const proj = get().getActiveProject()
+    if (proj) persistProject(proj)
   },
 
   saveSnapshot: (label = 'Auto-Snapshot') => {
@@ -520,7 +584,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       timestamp: Date.now(),
       label,
       scenes: JSON.parse(JSON.stringify(proj.scenes)),
-      assets: proj.assets.map(a => ({ ...a, dataUrl: '' })), // don't snapshot full assets
+      assets: proj.assets.map(a => ({ ...a, dataUrl: '' })),
     }
     set(s => ({
       projects: s.projects.map(p =>
@@ -532,7 +596,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       )
     }))
     const updated = get().projects.find(p => p.id === activeProjectId)
-    if (updated) storage.saveProject(updated)
+    if (updated) persistProject(updated)
   },
 
   restoreSnapshot: (snapshotId) => {
@@ -552,7 +616,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       )
     }))
     const updated = get().projects.find(p => p.id === activeProjectId)
-    if (updated) storage.saveProject(updated)
+    if (updated) persistProject(updated)
   },
 
   getHistory: () => {
@@ -589,7 +653,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   saveProject: (project) => {
-    storage.saveProject(project)
+    persistProject(project)
   },
 
   exportProject: async (id) => {
@@ -607,13 +671,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const zip = await JSZip.loadAsync(blob)
     const json = await zip.file('project.json')?.async('string')
     if (!json) throw new Error('Invalid ZIP: no project.json')
-    const proj: Project = JSON.parse(json)
+    const proj: Project = normalizeProject(JSON.parse(json))
     proj.id = uuidv4()
     proj.name = `${proj.name} (Import)`
     proj.createdAt = Date.now()
     proj.updatedAt = Date.now()
     set(s => ({ projects: [...s.projects, proj] }))
-    storage.saveProject(proj)
+    persistProject(proj)
     return proj
   },
 }))
